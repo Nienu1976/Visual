@@ -1,12 +1,18 @@
-"""漢字フラッシュクイズ動画ジェネレーター（書き順ストローク点滅版）。
+"""漢字フラッシュクイズ動画ジェネレーター（ランダムサンプリング点滅版）。
 
 アニメーション仕様：
-  ① ランダムに選んだ N ストロークが「点滅（ON/OFF 繰り返し）」
-  ② stage_duration 秒後にさらに N ストロークを追加して点滅継続
-  ③ ② を全ストロークが追加されるまで繰り返す
-  ④ 全ストロークを正解色（ゴールド）で静止表示
+  ① 毎フラッシュごとに「ランダムで異なるストロークの組み合わせ」を瞬間表示
+  ② 暗転（黒）→ 次の別の組み合わせをフラッシュ → 暗転 … を繰り返す
+  ③ ステージが進むごとに「1回のフラッシュで見えるストローク数」が増える
+  ④ ユーザーは複数フラッシュを見て脳内で合成し「何の漢字か」を推測する
+  ⑤ 最終ステージで全ストロークをゴールド静止表示（正解）
 
-これにより「何の漢字か」をストロークの点滅から推測するクイズになる。
+設定パラメータ：
+  flash_duration     : 1回のフラッシュ表示時間（秒）
+  flash_interval     : フラッシュ間の暗転時間（秒）
+  flashes_per_stage  : 1ステージあたりのフラッシュ回数
+  strokes_per_stage  : ステージごとに増やすストローク数
+  font_style         : "mincho" or "gothic"
 """
 from __future__ import annotations
 
@@ -36,25 +42,26 @@ class FlashConfig:
     fps: int = 30
 
     # ── 色 ──────────────────────────────────────────────────────
-    bg_color: tuple[int, int, int] = (13, 17, 23)           # 背景（ダークネイビー）
-    tile_bg_color: tuple[int, int, int] = (248, 248, 244)   # 漢字タイル（オフホワイト）
+    bg_color: tuple[int, int, int] = (13, 17, 23)
+    tile_bg_color: tuple[int, int, int] = (248, 248, 244)
     tile_border_color: tuple[int, int, int] = (180, 180, 180)
-    stroke_color: tuple[int, int, int] = (30, 30, 30)       # 点滅ON時のストローク色
-    answer_color: tuple[int, int, int] = (218, 165, 32)     # 正解時（ゴールド）
+    stroke_color: tuple[int, int, int] = (30, 30, 30)
+    answer_color: tuple[int, int, int] = (218, 165, 32)     # ゴールド
 
-    # ── 点滅タイミング ──────────────────────────────────────────
-    flash_on: float = 0.25      # 点灯時間（秒）：ストロークが見える時間
-    flash_off: float = 0.20     # 消灯時間（秒）：ストロークが消える時間
+    # ── フラッシュタイミング ─────────────────────────────────────
+    flash_duration: float = 0.20    # 1フラッシュの表示時間（秒）
+    flash_interval: float = 0.25    # フラッシュ間の暗転時間（秒）
 
     # ── ステージ設定 ────────────────────────────────────────────
-    strokes_per_stage: int = 1  # 1ステージで追加するストローク数
-    stage_duration: float = 2.5 # 1ステージの点滅継続時間（秒）
+    flashes_per_stage: int = 5      # 1ステージあたりのフラッシュ回数
+    strokes_per_stage: int = 1      # ステージごとに増やすストローク数（見える量）
+    initial_strokes: int = 1        # 最初のステージで見えるストローク数
 
     # ── 正解表示 ────────────────────────────────────────────────
-    answer_duration: float = 3.0  # 正解静止表示の秒数
+    answer_duration: float = 3.0
 
     # ── フォント ────────────────────────────────────────────────
-    font_style: str = "mincho"  # "mincho"（明朝体）or "gothic"（ゴシック体）
+    font_style: str = "mincho"      # "mincho" or "gothic"
 
     # ── ラベル ──────────────────────────────────────────────────
     question_label: str = ""
@@ -63,118 +70,125 @@ class FlashConfig:
     tile_padding: int = 60
 
 
+def _sample_across_chars(
+    all_refs: list[tuple[int, int]],
+    char_strokes: list[list[str]],
+    n_show: int,
+) -> list[tuple[int, int]]:
+    """各文字から最低1ストロークを保証してランダムにn_show個サンプルする。"""
+    n_chars = len(char_strokes)
+    # 各文字のストローク参照リスト
+    per_char = [
+        [(ci, si) for (ci, si) in all_refs if ci == i]
+        for i in range(n_chars)
+    ]
+    # 各文字から必ず1本確保（n_show より文字数が多くても全文字を保証）
+    guaranteed = [random.choice(refs) for refs in per_char if refs]
+
+    # n_show は guaranteed 数以上に引き上げる（文字数 < n_show なら追加サンプル）
+    actual_n = max(n_show, len(guaranteed))
+    remaining_pool = [r for r in all_refs if r not in set(guaranteed)]
+    extra_count = max(0, actual_n - len(guaranteed))
+    extra = random.sample(remaining_pool, min(extra_count, len(remaining_pool)))
+    return guaranteed + extra
+
+
 def generate_flash_quiz(
     word: str,
     output_path: Path | str,
     config: FlashConfig | None = None,
 ) -> Path:
-    """漢字フラッシュクイズ MP4 を生成する。
-
-    Args:
-        word: クイズにする漢字熟語（1文字以上）。
-        output_path: 出力 MP4 ファイルパス。
-        config: 生成設定（省略時はデフォルト）。
-
-    Returns:
-        生成した MP4 ファイルの Path。
-    """
+    """漢字フラッシュクイズ MP4 を生成する。"""
     if config is None:
         config = FlashConfig()
 
     font_path = get_font_path(config.font_style)
-
-    # ── 書き順ストローク取得 ────────────────────────────────────
     char_strokes: list[list[str]] = [get_strokes(ch) for ch in word]
     total_strokes = sum(len(s) for s in char_strokes)
 
     if total_strokes == 0:
-        # KanjiVG データなし → フォールバック（テキストフェードイン）
         return _generate_fallback(word, output_path, config, font_path)
 
-    # ── ランダムなストローク順序を生成 ─────────────────────────
+    # 全ストロークの参照リスト (char_idx, stroke_idx)
     all_refs: list[tuple[int, int]] = [
         (ci, si)
         for ci, strokes in enumerate(char_strokes)
         for si in range(len(strokes))
     ]
-    random.shuffle(all_refs)
 
-    # ── タイルサイズ計算 ────────────────────────────────────────
     tile_size = _calc_tile_size(len(word), config)
 
-    # ── フレーム生成 ────────────────────────────────────────────
+    # 暗転フレーム（共通）
+    dark_frame = _render_frame(
+        word, char_strokes, [], tile_size, config, font_path
+    )
+
     frames: list[np.ndarray] = []
 
-    # 最初：全ストロークなし（空のタイルのみ表示）で 0.5 秒
-    blank = _render_frame(word, char_strokes, set(), tile_size, config, font_path)
-    frames.extend(repeat_frame(blank, 0.5, config.fps))
+    # 冒頭：暗転 0.5 秒
+    frames.extend(repeat_frame(dark_frame, 0.5, config.fps))
 
-    # ステージループ：ストロークを N 本ずつ追加しながら点滅
-    active: set[tuple[int, int]] = set()  # 現在点滅中のストロークセット
+    # ── ステージループ ────────────────────────────────────────
+    # ステージ 0: initial_strokes 本表示
+    # ステージ 1: initial_strokes + strokes_per_stage 本表示
+    # ステージ 2: initial_strokes + strokes_per_stage*2 本表示 …
+    # 最終ステージ: 全ストローク表示（正解直前）
 
-    for stage_start in range(0, len(all_refs), config.strokes_per_stage):
-        batch = all_refs[stage_start : stage_start + config.strokes_per_stage]
-        active.update(batch)
+    visible_count = config.initial_strokes
+    prev_sampled: frozenset[tuple[int, int]] | None = None
+    while visible_count <= total_strokes:
+        n_show = min(visible_count, total_strokes)
 
-        # このステージで何サイクル点滅するか
-        cycle_len = config.flash_on + config.flash_off
-        n_cycles = max(1, int(config.stage_duration / cycle_len))
+        # 全ストローク表示になったらフラッシュせず正解へ
+        if n_show == total_strokes:
+            break
 
-        on_frame = _render_frame(
-            word, char_strokes, active, tile_size, config, font_path,
-            use_stroke_color=True
-        )
-        off_frame = _render_frame(
-            word, char_strokes, set(), tile_size, config, font_path,
-            use_stroke_color=False
-        )
+        for _ in range(config.flashes_per_stage):
+            # 直前と異なる組み合わせになるまで再サンプル（最大10回試行）
+            for _attempt in range(10):
+                sampled = _sample_across_chars(all_refs, char_strokes, n_show)
+                if frozenset(sampled) != prev_sampled:
+                    break
+            prev_sampled = frozenset(sampled)
 
-        for _ in range(n_cycles):
-            frames.extend(repeat_frame(on_frame, config.flash_on, config.fps))
-            frames.extend(repeat_frame(off_frame, config.flash_off, config.fps))
+            flash_frame = _render_frame(
+                word, char_strokes, sampled, tile_size, config, font_path
+            )
+            frames.extend(repeat_frame(flash_frame, config.flash_duration, config.fps))
+            frames.extend(repeat_frame(dark_frame, config.flash_interval, config.fps))
 
-    # 正解：全ストロークをゴールドで静止表示
+        visible_count += config.strokes_per_stage
+
+    # 正解フレーム：全ストロークをゴールドで静止
     answer_frame = _render_frame(
-        word, char_strokes, set(all_refs), tile_size, config, font_path,
-        answer_mode=True
+        word, char_strokes, all_refs, tile_size, config, font_path,
+        answer_mode=True,
     )
-    # 正解直前：一瞬全部点滅させて視線を引く
-    for _ in range(3):
-        frames.extend(repeat_frame(answer_frame, 0.1, config.fps))
-        frames.extend(repeat_frame(off_frame, 0.07, config.fps))
     frames.extend(repeat_frame(answer_frame, config.answer_duration, config.fps))
 
     return frames_to_mp4(
         frames, output_path,
-        fps=config.fps, width=config.width, height=config.height
+        fps=config.fps, width=config.width, height=config.height,
     )
 
 
-# ── レンダリング ─────────────────────────────────────────────────────
+# ── レンダリング ──────────────────────────────────────────────────────
 
 def _calc_tile_size(n: int, config: FlashConfig) -> int:
     available_w = config.width - config.tile_padding * 2 - config.tile_gap * (n - 1)
-    available_h = config.height - config.tile_padding * 2 - 60
+    available_h = config.height - config.tile_padding * 2 - 70
     return min(available_w // n, available_h)
 
 
 def _render_frame(
     word: str,
     char_strokes: list[list[str]],
-    active: set[tuple[int, int]],
+    visible_refs: list[tuple[int, int]],  # 今回表示する (ci, si) リスト
     tile_size: int,
     config: FlashConfig,
     font_path: Path,
-    use_stroke_color: bool = True,
     answer_mode: bool = False,
 ) -> np.ndarray:
-    """1フレーム分の画像を生成する。
-
-    Args:
-        active: 表示するストロークの (char_idx, stroke_idx) セット。
-        use_stroke_color: True=通常色、False=タイルを完全に空にする（OFF フレーム）。
-        answer_mode: True=ゴールドで全ストロークを表示。
-    """
     canvas = Image.new("RGB", (config.width, config.height), config.bg_color)
     draw = ImageDraw.Draw(canvas)
 
@@ -184,25 +198,24 @@ def _render_frame(
     tile_y = (config.height - tile_size) // 2 + 20
 
     base_style = make_default_style(tile_size, config.stroke_color)
+    visible_set = set(visible_refs)
 
     for ci, char in enumerate(word):
-        x = start_x + ci * (tile_size + config.tile_gap)
         strokes = char_strokes[ci]
+        x = start_x + ci * (tile_size + config.tile_gap)
 
-        # このタイルで表示するストロークとスタイルを決定
+        # このタイルで表示するストロークとスタイル
         visible: set[int] = set()
         stroke_styles: dict[int, StrokeStyle] = {}
 
         if answer_mode:
-            # 全ストロークをゴールドで表示
             visible = set(range(len(strokes)))
-            stroke_styles = {
-                si: StrokeStyle(color=config.answer_color, width=base_style.width)
-                for si in visible
-            }
-        elif use_stroke_color:
-            # アクティブなストロークを通常色で表示
-            for (aci, asi) in active:
+            for si in visible:
+                stroke_styles[si] = StrokeStyle(
+                    color=config.answer_color, width=base_style.width
+                )
+        else:
+            for (aci, asi) in visible_set:
                 if aci == ci:
                     visible.add(asi)
                     stroke_styles[asi] = base_style
@@ -215,7 +228,7 @@ def _render_frame(
         )
         canvas.paste(tile_img, (x, tile_y))
 
-    # ── ラベル描画 ───────────────────────────────────────────────
+    # 問題ラベル
     if config.question_label:
         lf = _load_font(font_path, config.label_size)
         draw.text((30, 20), config.question_label, font=lf, fill=(200, 200, 200))
@@ -229,7 +242,7 @@ def _render_frame(
             tw = bb[2] - bb[0]
             draw.text(
                 (cx - tw // 2, tile_y + tile_size + 14),
-                char, font=af, fill=config.answer_color
+                char, font=af, fill=config.answer_color,
             )
 
     return np.array(canvas)
@@ -248,13 +261,11 @@ def _load_font(
 
 def _generate_fallback(
     word: str, output_path: Path | str,
-    config: FlashConfig, font_path: Path
+    config: FlashConfig, font_path: Path,
 ) -> Path:
-    """KanjiVG データがない場合：テキストをフェードイン表示。"""
     font = _load_font(font_path, 240)
     frames = []
-
-    for step in range(20 + 1):
+    for step in range(21):
         alpha = int(255 * step / 20)
         img = Image.new("RGB", (config.width, config.height), config.bg_color)
         overlay = Image.new("RGBA", (config.width, config.height), (0, 0, 0, 0))
@@ -266,7 +277,6 @@ def _generate_fallback(
         od.text((x, y), word, font=font, fill=(*config.answer_color, alpha))
         merged = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
         frames.extend(repeat_frame(np.array(merged), 0.1, config.fps))
-
     frames.extend(repeat_frame(frames[-1], config.answer_duration, config.fps))
     return frames_to_mp4(frames, output_path, fps=config.fps,
                          width=config.width, height=config.height)
@@ -277,7 +287,6 @@ def generate_flash_quiz_batch(
     output_dir: Path | str,
     config: FlashConfig | None = None,
 ) -> list[Path]:
-    """複数の熟語をまとめて MP4 生成する。"""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     results = []

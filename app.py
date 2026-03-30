@@ -11,7 +11,7 @@ from pathlib import Path
 import gradio as gr
 
 # ── 出力先ディレクトリ（セッション間で共有） ──────────────────────────
-OUTPUT_DIR = Path("output")
+OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
@@ -25,16 +25,16 @@ def run_flash(
     flash_on: float,
     flash_off: float,
     strokes_per_stage: int,
-    stage_duration: float,
+    flashes_per_stage: int,
     answer_duration: float,
     progress=gr.Progress(track_tqdm=True),
-) -> tuple[str | None, str | None, str]:
-    """フラッシュクイズMP4を生成して (動画パス, ダウンロードパス, ステータス) を返す。"""
+) -> tuple[str | None, str]:
+    """フラッシュクイズMP4を生成して (動画パス, ステータス) を返す。"""
     from visualquiz.quiz1_flash.flash_generator import FlashConfig, generate_flash_quiz
 
     words = [w.strip() for w in words_text.splitlines() if w.strip()]
     if not words:
-        return None, None, "❌ 熟語を1つ以上入力してください"
+        return None, "❌ 熟語を1つ以上入力してください"
 
     out_dir = OUTPUT_DIR / "flash"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -45,10 +45,10 @@ def run_flash(
             progress((i + 0.3) / len(words), desc=f"[{i+1}/{len(words)}] {word} の書き順データ取得中...")
             cfg = FlashConfig(
                 font_style=font_style,
-                flash_on=flash_on,
-                flash_off=flash_off,
+                flash_duration=flash_on,
+                flash_interval=flash_off,
                 strokes_per_stage=strokes_per_stage,
-                stage_duration=stage_duration,
+                flashes_per_stage=flashes_per_stage,
                 answer_duration=answer_duration,
                 question_label=f"Q{i+1}" if len(words) > 1 else "",
             )
@@ -59,11 +59,11 @@ def run_flash(
 
         final_path = mp4_files[0] if len(mp4_files) == 1 else _concat_videos(mp4_files, out_dir / "flash_all.mp4")
         progress(1.0, desc="完了")
-        return str(final_path), str(final_path), f"✅ 生成完了: {len(words)}問"
+        return str(final_path), f"✅ 生成完了: {len(words)}問"
 
     except Exception as e:
         import traceback
-        return None, None, f"❌ エラー: {e}\n{traceback.format_exc()}"
+        return None, f"❌ エラー: {e}\n{traceback.format_exc()}"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -78,7 +78,7 @@ def run_lyrics(
     page_duration: float,
     show_answer: bool,
     progress=gr.Progress(track_tqdm=True),
-) -> tuple[str | None, str | None, str]:
+) -> tuple[str | None, str]:
     from visualquiz.quiz2_lyrics.lyrics_video import LyricsConfig, LyricsMode, generate_lyrics_quiz
 
     # ファイルアップロードを優先
@@ -88,7 +88,7 @@ def run_lyrics(
         lyrics = lyrics_text.strip()
 
     if not lyrics:
-        return None, None, "❌ 歌詞を入力またはファイルをアップロードしてください"
+        return None, "❌ 歌詞を入力またはファイルをアップロードしてください"
 
     progress(0.2, desc="生成中...")
     config = LyricsConfig(
@@ -105,9 +105,9 @@ def run_lyrics(
     try:
         generate_lyrics_quiz(lyrics, out, config)
         progress(1.0, desc="完了")
-        return str(out), str(out), "✅ 生成完了"
+        return str(out), "✅ 生成完了"
     except Exception as e:
-        return None, None, f"❌ エラー: {e}"
+        return None, f"❌ エラー: {e}"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -120,14 +120,14 @@ def run_puzzle(
     move_duration: float,
     complete_duration: float,
     progress=gr.Progress(track_tqdm=True),
-) -> tuple[str | None, str | None, str]:
+) -> tuple[str | None, str]:
     from visualquiz.quiz3_puzzle.puzzle_video import PuzzleConfig, generate_puzzle_quiz
 
     kanji_str = kanji_str.strip()
     if not kanji_str:
-        return None, None, "❌ 漢字文字列を入力してください"
+        return None, "❌ 漢字文字列を入力してください"
     if len(kanji_str) < 2:
-        return None, None, "❌ 2文字以上入力してください（空きスペース用に1マス必要）"
+        return None, "❌ 2文字以上入力してください（空きスペース用に1マス必要）"
 
     progress(0.1, desc="パズルを生成中...")
     config = PuzzleConfig(
@@ -142,9 +142,9 @@ def run_puzzle(
         progress(0.3, desc="A*で解法を計算中...")
         generate_puzzle_quiz(kanji_str, out, config)
         progress(1.0, desc="完了")
-        return str(out), str(out), f"✅ 生成完了: {len(kanji_str)}文字パズル"
+        return str(out), f"✅ 生成完了: {len(kanji_str)}文字パズル"
     except Exception as e:
-        return None, None, f"❌ エラー: {e}"
+        return None, f"❌ エラー: {e}"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -243,32 +243,32 @@ with gr.Blocks(title="ビジュアル漢字クイズ") as demo:
                         label="🖋 フォント",
                     )
 
-                    # ── 点滅設定 ─────────────────────────────
-                    gr.Markdown("**⚡ 点滅設定**")
+                    # ── フラッシュ速度設定 ────────────────────
+                    gr.Markdown("**⚡ フラッシュ速度**")
                     with gr.Row():
                         flash_on_sl = gr.Slider(
-                            0.05, 0.8, value=0.25, step=0.05,
-                            label="点灯時間（秒）",
-                            info="ストロークが見える時間"
+                            0.05, 0.8, value=0.20, step=0.05,
+                            label="表示時間（秒）",
+                            info="フラッシュが見える時間"
                         )
                         flash_off_sl = gr.Slider(
-                            0.05, 0.8, value=0.20, step=0.05,
-                            label="消灯時間（秒）",
-                            info="ストロークが消える時間"
+                            0.05, 0.8, value=0.25, step=0.05,
+                            label="暗転時間（秒）",
+                            info="フラッシュ間の黒画面時間"
                         )
 
                     # ── ステージ設定 ──────────────────────────
-                    gr.Markdown("**📈 ステージ設定（パーツを増やすタイミング）**")
+                    gr.Markdown("**📈 ステージ設定（フラッシュごとに見えるパーツ数を増やす）**")
                     with gr.Row():
                         strokes_per_stage_sl = gr.Slider(
                             1, 5, value=1, step=1,
-                            label="1ステージで追加するパーツ数",
-                            info="少ないほど難しい"
+                            label="1ステージで増やすパーツ数",
+                            info="少ないほど難しい・長くなる"
                         )
                         stage_duration_sl = gr.Slider(
-                            1.0, 8.0, value=2.5, step=0.5,
-                            label="1ステージの点滅時間（秒）",
-                            info="パーツが増えるまでの間隔"
+                            2, 20, value=5, step=1,
+                            label="1ステージのフラッシュ回数",
+                            info="同じパーツ数で何回フラッシュするか"
                         )
 
                     with gr.Accordion("⚙️ その他", open=False):
@@ -281,8 +281,7 @@ with gr.Blocks(title="ビジュアル漢字クイズ") as demo:
                     flash_status = gr.Textbox(label="ステータス", interactive=False, lines=2)
 
                 with gr.Column(scale=2):
-                    flash_video_out = gr.Video(label="プレビュー", height=420)
-                    flash_dl = gr.File(label="📥 MP4ダウンロード")
+                    flash_video_out = gr.Video(label="プレビュー（右下のアイコンでダウンロード）", height=420)
 
             flash_btn.click(
                 run_flash,
@@ -292,10 +291,10 @@ with gr.Blocks(title="ビジュアル漢字クイズ") as demo:
                     strokes_per_stage_sl, stage_duration_sl,
                     flash_answer_sl,
                 ],
-                outputs=[flash_video_out, flash_dl, flash_status],
+                outputs=[flash_video_out, flash_status],
             ).then(
                 lambda v: v,
-                inputs=[flash_dl],
+                inputs=[flash_video_out],
                 outputs=[flash_mp4_state],
             )
 
@@ -332,17 +331,16 @@ with gr.Blocks(title="ビジュアル漢字クイズ") as demo:
                     lyrics_status = gr.Textbox(label="ステータス", interactive=False, lines=1)
 
                 with gr.Column(scale=2):
-                    lyrics_video_out = gr.Video(label="プレビュー", height=400)
-                    lyrics_dl = gr.File(label="📥 MP4ダウンロード")
+                    lyrics_video_out = gr.Video(label="プレビュー（右下のアイコンでダウンロード）", height=400)
 
             lyrics_btn.click(
                 run_lyrics,
                 inputs=[lyrics_text_in, lyrics_file_in, lyrics_mode, lyrics_title,
                         page_duration_sl, show_answer_cb],
-                outputs=[lyrics_video_out, lyrics_dl, lyrics_status],
+                outputs=[lyrics_video_out, lyrics_status],
             ).then(
                 lambda v: v,
-                inputs=[lyrics_dl],
+                inputs=[lyrics_video_out],
                 outputs=[lyrics_mp4_state],
             )
 
@@ -381,16 +379,15 @@ with gr.Blocks(title="ビジュアル漢字クイズ") as demo:
                     puzzle_status = gr.Textbox(label="ステータス", interactive=False, lines=1)
 
                 with gr.Column(scale=2):
-                    puzzle_video_out = gr.Video(label="プレビュー", height=400)
-                    puzzle_dl = gr.File(label="📥 MP4ダウンロード")
+                    puzzle_video_out = gr.Video(label="プレビュー（右下のアイコンでダウンロード）", height=400)
 
             puzzle_btn.click(
                 run_puzzle,
                 inputs=[puzzle_input, shuffle_sl, move_dur_sl, complete_dur_sl],
-                outputs=[puzzle_video_out, puzzle_dl, puzzle_status],
+                outputs=[puzzle_video_out, puzzle_status],
             ).then(
                 lambda v: v,
-                inputs=[puzzle_dl],
+                inputs=[puzzle_video_out],
                 outputs=[puzzle_mp4_state],
             )
 
@@ -422,4 +419,5 @@ if __name__ == "__main__":
         inbrowser=True,
         theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
         css=_CSS,
+        allowed_paths=[str(OUTPUT_DIR)],
     )
