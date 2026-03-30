@@ -21,54 +21,49 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 
 def run_flash(
     words_text: str,
-    flash_duration: float,
-    hold_duration: float,
+    font_style: str,
+    flash_on: float,
+    flash_off: float,
+    strokes_per_stage: int,
+    stage_duration: float,
     answer_duration: float,
     progress=gr.Progress(track_tqdm=True),
 ) -> tuple[str | None, str | None, str]:
     """フラッシュクイズMP4を生成して (動画パス, ダウンロードパス, ステータス) を返す。"""
-    from visualquiz.quiz1_flash.flash_generator import FlashConfig, generate_flash_quiz_batch
+    from visualquiz.quiz1_flash.flash_generator import FlashConfig, generate_flash_quiz
 
     words = [w.strip() for w in words_text.splitlines() if w.strip()]
     if not words:
         return None, None, "❌ 熟語を1つ以上入力してください"
 
-    progress(0, desc="KanjiVG書き順データを取得中...")
     out_dir = OUTPUT_DIR / "flash"
-    config = FlashConfig(
-        flash_duration=flash_duration,
-        hold_duration=hold_duration,
-        answer_duration=answer_duration,
-    )
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         mp4_files = []
         for i, word in enumerate(words):
-            progress((i + 0.5) / len(words), desc=f"{word} を生成中...")
+            progress((i + 0.3) / len(words), desc=f"[{i+1}/{len(words)}] {word} の書き順データ取得中...")
             cfg = FlashConfig(
-                flash_duration=flash_duration,
-                hold_duration=hold_duration,
+                font_style=font_style,
+                flash_on=flash_on,
+                flash_off=flash_off,
+                strokes_per_stage=strokes_per_stage,
+                stage_duration=stage_duration,
                 answer_duration=answer_duration,
                 question_label=f"Q{i+1}" if len(words) > 1 else "",
             )
-            from visualquiz.quiz1_flash.flash_generator import generate_flash_quiz
             out = out_dir / f"flash_{i+1:03d}_{word}.mp4"
-            out.parent.mkdir(parents=True, exist_ok=True)
             generate_flash_quiz(word, out, cfg)
             mp4_files.append(out)
             progress((i + 1) / len(words), desc=f"{word} 完了")
 
-        # 複数ある場合は連結
-        if len(mp4_files) == 1:
-            final_path = mp4_files[0]
-        else:
-            final_path = _concat_videos(mp4_files, out_dir / "flash_all.mp4")
-
+        final_path = mp4_files[0] if len(mp4_files) == 1 else _concat_videos(mp4_files, out_dir / "flash_all.mp4")
         progress(1.0, desc="完了")
         return str(final_path), str(final_path), f"✅ 生成完了: {len(words)}問"
 
     except Exception as e:
-        return None, None, f"❌ エラー: {e}"
+        import traceback
+        return None, None, f"❌ エラー: {e}\n{traceback.format_exc()}"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -211,14 +206,7 @@ _CSS = """
 .generate-btn { min-width: 160px; }
 """
 
-with gr.Blocks(
-    theme=gr.themes.Soft(
-        primary_hue="blue",
-        neutral_hue="slate",
-    ),
-    title="ビジュアル漢字クイズ",
-    css=_CSS,
-) as demo:
+with gr.Blocks(title="ビジュアル漢字クイズ") as demo:
 
     # ─── タイトル ───────────────────────────────────────────────
     gr.Markdown("# 🎴 ビジュアル漢字クイズ生成ツール", elem_id="title")
@@ -237,39 +225,73 @@ with gr.Blocks(
         # ══ タブ①：フラッシュクイズ ══════════════════════════════
         with gr.TabItem("① フラッシュクイズ（書き順）"):
             gr.Markdown(
-                "### 書き順ストロークをランダムにフラッシュ → だんだん文字が完成するクイズ\n"
-                "KanjiVG（CC BY-SA 3.0）の書き順データを使用します。初回はダウンロードが発生します。"
+                "### 書き順パーツが点滅 → だんだん増えていく → 何の漢字か推測するクイズ\n"
+                "KanjiVG（CC BY-SA 3.0）の書き順データを使用。初回は自動ダウンロードします。"
             )
             with gr.Row():
-                with gr.Column(scale=1, min_width=280):
+                with gr.Column(scale=1, min_width=300):
                     flash_input = gr.Textbox(
                         label="熟語（1行1単語）",
                         placeholder="桜花\n雷雨\n日本語",
                         lines=5,
                     )
-                    with gr.Accordion("⚙️ 詳細設定", open=False):
-                        flash_duration_sl = gr.Slider(
-                            0.1, 1.0, value=0.35, step=0.05,
-                            label="フラッシュ時間（秒）"
+
+                    # ── フォント選択（常時表示） ──────────────
+                    flash_font = gr.Radio(
+                        choices=[("明朝体", "mincho"), ("ゴシック体", "gothic")],
+                        value="mincho",
+                        label="🖋 フォント",
+                    )
+
+                    # ── 点滅設定 ─────────────────────────────
+                    gr.Markdown("**⚡ 点滅設定**")
+                    with gr.Row():
+                        flash_on_sl = gr.Slider(
+                            0.05, 0.8, value=0.25, step=0.05,
+                            label="点灯時間（秒）",
+                            info="ストロークが見える時間"
                         )
-                        hold_duration_sl = gr.Slider(
-                            0.05, 0.5, value=0.2, step=0.05,
-                            label="確定後の静止時間（秒）"
+                        flash_off_sl = gr.Slider(
+                            0.05, 0.8, value=0.20, step=0.05,
+                            label="消灯時間（秒）",
+                            info="ストロークが消える時間"
                         )
-                        answer_duration_sl = gr.Slider(
+
+                    # ── ステージ設定 ──────────────────────────
+                    gr.Markdown("**📈 ステージ設定（パーツを増やすタイミング）**")
+                    with gr.Row():
+                        strokes_per_stage_sl = gr.Slider(
+                            1, 5, value=1, step=1,
+                            label="1ステージで追加するパーツ数",
+                            info="少ないほど難しい"
+                        )
+                        stage_duration_sl = gr.Slider(
+                            1.0, 8.0, value=2.5, step=0.5,
+                            label="1ステージの点滅時間（秒）",
+                            info="パーツが増えるまでの間隔"
+                        )
+
+                    with gr.Accordion("⚙️ その他", open=False):
+                        flash_answer_sl = gr.Slider(
                             1.0, 6.0, value=3.0, step=0.5,
                             label="正解表示時間（秒）"
                         )
+
                     flash_btn = gr.Button("🎬 生成", variant="primary", elem_classes="generate-btn")
-                    flash_status = gr.Textbox(label="ステータス", interactive=False, lines=1)
+                    flash_status = gr.Textbox(label="ステータス", interactive=False, lines=2)
 
                 with gr.Column(scale=2):
-                    flash_video_out = gr.Video(label="プレビュー", height=400)
+                    flash_video_out = gr.Video(label="プレビュー", height=420)
                     flash_dl = gr.File(label="📥 MP4ダウンロード")
 
             flash_btn.click(
                 run_flash,
-                inputs=[flash_input, flash_duration_sl, hold_duration_sl, answer_duration_sl],
+                inputs=[
+                    flash_input, flash_font,
+                    flash_on_sl, flash_off_sl,
+                    strokes_per_stage_sl, stage_duration_sl,
+                    flash_answer_sl,
+                ],
                 outputs=[flash_video_out, flash_dl, flash_status],
             ).then(
                 lambda v: v,
@@ -397,6 +419,7 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        open_browser=True,
-        show_error=True,
+        inbrowser=True,
+        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
+        css=_CSS,
     )
