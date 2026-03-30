@@ -2,7 +2,7 @@
 
 漢字ビジュアルクイズ自動生成ツール
 
-[![CI](https://github.com/YOUR_USERNAME/visualquiz/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/visualquiz/actions)
+[![CI](https://github.com/Nienu1976/Visual/actions/workflows/ci.yml/badge.svg)](https://github.com/Nienu1976/Visual/actions)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -48,7 +48,7 @@ pip install visualquiz
 ### ソースからインストール
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/visualquiz.git
+git clone https://github.com/Nienu1976/Visual.git
 cd visualquiz
 pip install -e .
 ```

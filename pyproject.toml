@@ -42,9 +42,9 @@ dev = [
 visualquiz = "visualquiz.main:cli"
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/visualquiz"
-Repository = "https://github.com/YOUR_USERNAME/visualquiz"
-Issues = "https://github.com/YOUR_USERNAME/visualquiz/issues"
+Homepage = "https://github.com/Nienu1976/Visual"
+Repository = "https://github.com/Nienu1976/Visual"
+Issues = "https://github.com/Nienu1976/Visual/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["visualquiz"]
