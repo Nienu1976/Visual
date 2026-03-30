@@ -25,11 +25,6 @@ def frames_to_mp4(
     Returns:
         書き出したファイルのPathオブジェクト。
     """
-    try:
-        from moviepy.editor import ImageSequenceClip
-    except ImportError:
-        raise ImportError("moviepyをインストールしてください: pip install moviepy")
-
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -37,6 +32,15 @@ def frames_to_mp4(
     normalized = [
         (f.astype(np.uint8) if f.dtype != np.uint8 else f) for f in frames
     ]
+
+    # moviepy v2系とv1系の両方に対応
+    try:
+        from moviepy import ImageSequenceClip  # v2.x
+    except ImportError:
+        try:
+            from moviepy.editor import ImageSequenceClip  # v1.x
+        except ImportError:
+            raise ImportError("moviepyをインストールしてください: pip install moviepy")
 
     clip = ImageSequenceClip(normalized, fps=fps)
     clip.write_videofile(
