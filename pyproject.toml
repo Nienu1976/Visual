@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "visualquiz"
+version = "0.1.0"
+description = "漢字ビジュアルクイズ自動生成ツール / Visual Kanji Quiz Generator"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "visualquiz contributors" }]
+keywords = ["kanji", "quiz", "japanese", "video", "animation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video",
+    "Natural Language :: Japanese",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "moviepy>=1.0.3",
+    "Pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "python-pptx>=0.6.21",
+    "click>=8.1.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+
+[project.scripts]
+visualquiz = "visualquiz.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/visualquiz"
+Repository = "https://github.com/YOUR_USERNAME/visualquiz"
+Issues = "https://github.com/YOUR_USERNAME/visualquiz/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["visualquiz"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=visualquiz --cov-report=term-missing"
